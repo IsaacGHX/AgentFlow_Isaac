@@ -109,17 +109,23 @@ class ChatDashScope(EngineLM, CachedEngine):
             }
         
     def _generate_text(
-        self, prompt, system_prompt=None, temperature=0, max_tokens=2048, top_p=0.99, response_format=None
+        self, prompt, system_prompt=None, temperature=0, max_tokens=2048, top_p=0.99, response_format=None, non_thinking=True
     ):
 
         sys_prompt_arg = system_prompt if system_prompt else self.system_prompt
+
+        # Add /no_think directive for Qwen3 models to prevent errors
+        # Reference: https://www.alibabacloud.com/help/en/model-studio/deep-thinking
+        if non_thinking and "qwen" in self.model_string.lower():
+            if not prompt.strip().endswith("/no_think"):
+                prompt = f"{prompt}\n/no_think"
 
         if self.use_cache:
             cache_key = sys_prompt_arg + prompt
             cache_or_none = self._check_cache(cache_key)
             if cache_or_none is not None:
                 return cache_or_none
-            
+
         messages = [
             {"role": "system", "content": sys_prompt_arg},
             {"role": "user", "content": prompt}
@@ -131,7 +137,8 @@ class ChatDashScope(EngineLM, CachedEngine):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": top_p,
-            "result_format": "message"
+            "result_format": "message",
+            "enable_thinking": False
         }
 
         response = dashscope.Generation.call(**request_params)
@@ -184,10 +191,20 @@ class ChatDashScope(EngineLM, CachedEngine):
         return formatted_content
 
     def _generate_multimodal(
-        self, content: List[Union[str, bytes]], system_prompt=None, temperature=0, max_tokens=512, top_p=0.99, response_format=None
+        self, content: List[Union[str, bytes]], system_prompt=None, temperature=0, max_tokens=512, top_p=0.99, response_format=None, non_thinking=True
     ):
         sys_prompt_arg = system_prompt if system_prompt else self.system_prompt
         formatted_content = self._format_content(content)
+
+        # Add /no_think directive for Qwen3 models to prevent errors
+        # Reference: https://www.alibabacloud.com/help/en/model-studio/deep-thinking
+        if non_thinking and "qwen" in self.model_string.lower():
+            # Find the last text item in formatted_content and append /no_think
+            for i in range(len(formatted_content) - 1, -1, -1):
+                if formatted_content[i].get("type") == "text":
+                    if not formatted_content[i]["text"].strip().endswith("/no_think"):
+                        formatted_content[i]["text"] = f"{formatted_content[i]['text']}\n/no_think"
+                    break
 
         if self.use_cache:
             cache_key = sys_prompt_arg + json.dumps(formatted_content)
@@ -206,7 +223,8 @@ class ChatDashScope(EngineLM, CachedEngine):
             "temperature": temperature,
             "max_tokens": max_tokens,
             "top_p": top_p,
-            "result_format": "message"
+            "result_format": "message",
+            "enable_thinking": False
         }
 
         response = dashscope.Generation.call(**request_params)

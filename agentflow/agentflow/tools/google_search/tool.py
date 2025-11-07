@@ -15,7 +15,7 @@ from typing import List
 import re
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Ground_Google_Search_Tool"
+TOOL_NAME = "Google_Search_Tool"
 
 LIMITATIONS = """
 1. This tool is only suitable for general information search.

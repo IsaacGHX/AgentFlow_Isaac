@@ -11,13 +11,18 @@ from agentflow.models.memory import Memory
 
 
 class Planner:
-    def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None, 
+    def __init__(self, llm_engine_name: str, toolbox_metadata: dict = None, available_tools: List = None,
     verbose: bool = False, base_url: str = None, is_multimodal: bool = False, check_model: bool = True, temperature : float = .0):
         self.llm_engine_name = llm_engine_name
         self.is_multimodal = is_multimodal
         # self.llm_engine_mm = create_llm_engine(model_string=llm_engine_name, is_multimodal=False, base_url=base_url, temperature = temperature)
-        self.llm_engine_fixed = create_llm_engine(model_string="dashscope", is_multimodal=False, temperature = temperature)
-        self.llm_engine = create_llm_engine(model_string=llm_engine_name, is_multimodal=False, base_url=base_url, temperature = temperature)
+        self.llm_engine_fixed = create_llm_engine(model_string="dashscope-qwen2.5-7b-instruct", is_multimodal=False, temperature = temperature)
+
+        # Only pass base_url for vLLM models, not for remote APIs like DashScope, OpenAI, etc.
+        if "vllm" in llm_engine_name and base_url:
+            self.llm_engine = create_llm_engine(model_string=llm_engine_name, is_multimodal=False, base_url=base_url, temperature = temperature)
+        else:
+            self.llm_engine = create_llm_engine(model_string=llm_engine_name, is_multimodal=False, temperature = temperature)
         self.toolbox_metadata = toolbox_metadata if toolbox_metadata is not None else {}
         self.available_tools = available_tools if available_tools is not None else []
 

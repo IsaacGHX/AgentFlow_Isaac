@@ -11,7 +11,7 @@ from agentflow.engine.factory import create_llm_engine
 load_dotenv()
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Web_RAG_Search_Tool"
+TOOL_NAME = "Web_Search_Tool"
 
 LIMITATION = f"""
 The {TOOL_NAME} has several limitations: 

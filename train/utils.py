@@ -7,6 +7,14 @@ class AnswerVerification(BaseModel):
     analysis: str
     true_false: bool
 
+
+class TurnScoreResult(BaseModel):
+    reasoning: str
+    tool_usage_score: float  # 0-1
+    memory_usage_score: float  # 0-1
+    correctness_score: float  # 0-1
+    overall_score: float  # 0-1
+
 try:
     llm_scorer_engine = ChatOpenAI(
         model_string="gpt-4o", 
@@ -69,8 +77,177 @@ def eval(question: str, groundtruth: any, answer_extracted: any, val: bool = Fal
     answer_extracted_str = str(answer_extracted)
 
     is_correct = compute_score(question_str, answer_extracted_str, groundtruth_str)
-    
+
     return 1.0 if is_correct else 0.0
+
+
+def compute_turn_score(
+    turn_index: int,
+    action_planner_response: str,
+    tools_used: list,
+    memory_context: str,
+    is_final_turn: bool,
+    final_answer_correct: bool = None
+) -> float:
+    """
+    Uses GPT-4o to evaluate the quality of a single turn's action planner response.
+
+    Args:
+        turn_index: The index of the current turn (0-based)
+        action_planner_response: The response from the action planner for this turn
+        tools_used: List of tools/actions used in this turn
+        memory_context: The memory/context available at this turn
+        is_final_turn: Whether this is the final turn
+        final_answer_correct: Whether the final answer was correct (only for final turn)
+
+    Returns:
+        A score between 0 and 1 for this turn
+    """
+    if llm_scorer_engine is None:
+        raise RuntimeError("LLM Scorer engine is not available.")
+
+    # Build the evaluation prompt
+    tools_str = ", ".join(tools_used) if tools_used else "None"
+
+    prompt = f"""
+You are an expert evaluator of AI agent reasoning steps. Evaluate the quality of this action planner's response for turn {turn_index}.
+
+**Evaluation Criteria:**
+
+1. **Tool/Action Selection (0-1)**:
+   - Are the selected tools appropriate for the current task?
+   - Is the action logical given the context?
+
+2. **Memory Utilization (0-1)**:
+   - Does the response effectively use previous context/memory?
+   - Is there good continuity with prior turns?
+
+3. **Step Correctness (0-1)**:
+   - Is this step moving toward the solution?
+   - Are there logical errors or incorrect reasoning?
+   {"- Final answer correctness: " + ("CORRECT" if final_answer_correct else "INCORRECT") if is_final_turn else ""}
+
+**Input Information:**
+- Turn Index: {turn_index}
+- Is Final Turn: {is_final_turn}
+- Tools/Actions Used: {tools_str}
+- Memory/Context: {memory_context[:500]}...
+- Action Planner Response: {action_planner_response[:1000]}...
+
+**Instructions:**
+1. Provide brief reasoning for each criterion
+2. Assign scores (0.0 to 1.0) for:
+   - tool_usage_score
+   - memory_usage_score
+   - correctness_score
+3. Calculate overall_score as weighted average:
+   - If final turn and answer provided: 0.3*tool + 0.2*memory + 0.5*correctness
+   - Otherwise: 0.4*tool + 0.3*memory + 0.3*correctness
+
+**Output Format:**
+<reasoning>: Your analysis (2-3 sentences)
+<tool_usage_score>: float (0.0-1.0)
+<memory_usage_score>: float (0.0-1.0)
+<correctness_score>: float (0.0-1.0)
+<overall_score>: float (0.0-1.0)
+"""
+
+    try:
+        result = llm_scorer_engine(prompt, response_format=TurnScoreResult)
+        return result.overall_score
+    except Exception as e:
+        print(f"Error evaluating turn {turn_index}: {e}")
+        # Fallback: return 0.5 if evaluation fails
+        return 0.5
+
+
+def compute_turn_scores_batch(
+    turns_data: list[dict]
+) -> list[float]:
+    """
+    Batch version of compute_turn_score that evaluates multiple turns concurrently.
+
+    This significantly speeds up evaluation when there are multiple turns to score,
+    as it sends all requests to GPT-4o in parallel using ThreadPoolExecutor.
+
+    Args:
+        turns_data: List of dictionaries, each containing:
+            - turn_index: int
+            - action_planner_response: str
+            - tools_used: list
+            - memory_context: str
+            - is_final_turn: bool
+            - final_answer_correct: bool (optional)
+
+    Returns:
+        List of scores (0-1) for each turn, in the same order as input
+
+    Example:
+        turns_data = [
+            {
+                "turn_index": 0,
+                "action_planner_response": "I will search...",
+                "tools_used": ["Google_Search_Tool"],
+                "memory_context": "User asked...",
+                "is_final_turn": False,
+                "final_answer_correct": None
+            },
+            {
+                "turn_index": 1,
+                "action_planner_response": "Based on results...",
+                "tools_used": ["Base_Generator_Tool"],
+                "memory_context": "Previous search...",
+                "is_final_turn": True,
+                "final_answer_correct": True
+            }
+        ]
+        scores = compute_turn_scores_batch(turns_data)
+        # Returns: [0.85, 0.92]
+    """
+    if llm_scorer_engine is None:
+        raise RuntimeError("LLM Scorer engine is not available.")
+
+    if not turns_data:
+        return []
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def score_single_turn(turn_data):
+        """Helper function to score a single turn"""
+        try:
+            return compute_turn_score(
+                turn_index=turn_data["turn_index"],
+                action_planner_response=turn_data["action_planner_response"],
+                tools_used=turn_data["tools_used"],
+                memory_context=turn_data["memory_context"],
+                is_final_turn=turn_data["is_final_turn"],
+                final_answer_correct=turn_data.get("final_answer_correct", None)
+            )
+        except Exception as e:
+            print(f"Error in batch scoring turn {turn_data['turn_index']}: {e}")
+            return 0.5  # Fallback score
+
+    # Use ThreadPoolExecutor for concurrent API calls
+    # max_workers=10 allows up to 10 concurrent requests to OpenAI
+    scores = [None] * len(turns_data)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit all tasks and keep track of their indices
+        future_to_idx = {
+            executor.submit(score_single_turn, turn_data): idx
+            for idx, turn_data in enumerate(turns_data)
+        }
+
+        # Collect results as they complete
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                scores[idx] = future.result()
+            except Exception as e:
+                print(f"Error retrieving result for turn {idx}: {e}")
+                scores[idx] = 0.5  # Fallback
+
+    return scores
 
 async def main():
     # ==============================================================================

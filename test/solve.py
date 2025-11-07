@@ -383,7 +383,8 @@ def main(args):
         root_cache_dir=args.root_cache_dir,
         verbose=args.verbose,
         base_url=args.base_url,
-        temperature=args.temperature
+        temperature=args.temperature,
+        tool_instances=initializer.tool_instances  # Pass cached tool instances
     )
 
     # Instantiate Solver

@@ -1,5 +1,5 @@
 #!/bin/bash
-
+# scripts/serve_vllm.sh
 # ===========================================================================
 # Script: serve_vllm.sh
 # Description:
@@ -9,10 +9,24 @@
 #   - Port 8000
 # ===========================================================================
 
-MODEL="AgentFlow/agentflow-planner-7b"
-GPU="0"
-PORT=8000
-TMUX_SESSION="vllm_agentflow"
+# MODEL="checkpoints/AgentFlow_reverse_discount_Reward_qwen2.5-7B/rollout_all_qwen2.5-7B_reverse_discount_Reward/global_step_34/actor/huggingface"
+# MODEL="checkpoints/AgentFlow_Reward_qwen2.5-1.5B/rollout_all_qwen2.5-1.5B/global_step_34/actor/huggingface"
+# MODEL="checkpoints/AgentFlow_Llama-3.2-3B/rollout_all_Llama-3.2-3B/global_step_28/actor/huggingface"
+# MODEL="checkpoints/AgentFlow_Llama-3.1-8B/rollout_all_Llama-3.1-8B/global_step_18/actor/huggingface"
+# MODEL="Qwen/Qwen2.5-1.5B-Instruct"
+MODEL="checkpoints/AgentFlow_Qwen2.5-7B-turn5/rollout_all_Qwen2.5-7B-turn5/global_step_26/actor/huggingface"
+# GPU="4"
+# GPU="5"
+# GPU="6"
+GPU="7"
+# PORT=8004
+# PORT=8005
+# PORT=8006
+PORT=8007
+# TMUX_SESSION="vllm_agentflow4"
+# TMUX_SESSION="vllm_agentflow5"
+# TMUX_SESSION="vllm_agentflow6"
+TMUX_SESSION="vllm_agentflow7"
 TP=1
 
 VENV_ACTIVATE="source .venv/bin/activate"

@@ -418,6 +418,9 @@ class AgentFlowTrainer(RayPPOTrainer):
             pad_token_id=self.tokenizer.pad_token_id,
             enable_rollout_validation=self.config.agentflow.get("enable_rollout_validation", True),
             max_empty_retries=self.config.agentflow.get("max_empty_retries", 2),
+            reward_shaping_gamma=self.config.agentflow.get("reward_shaping_gamma", 0.99),
+            enable_reward_shaping=self.config.agentflow.get("enable_reward_shaping", True),
+            reward_mode=self.config.agentflow.get("reward_mode", "discount"),
         )
         self.agent_mode_daemon.start()
 

@@ -3,7 +3,7 @@ from agentflow.tools.base import BaseTool
 from agentflow.engine.factory import create_llm_engine
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Generalist_Solution_Generator_Tool"
+TOOL_NAME = "Base_Generator_Tool"
 
 LIMITATION = f"""
 The {TOOL_NAME} may provide hallucinated or incorrect responses.

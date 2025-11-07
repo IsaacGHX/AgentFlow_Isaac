@@ -16,7 +16,7 @@ from contextlib import contextmanager
 import platform
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Python_Code_Generator_Tool"
+TOOL_NAME = "Python_Coder_Tool"
 
 def is_windows_os():
     system=platform.system()

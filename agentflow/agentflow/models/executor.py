@@ -9,38 +9,7 @@ from typing import Any, Dict, List, Optional
 from agentflow.engine.factory import create_llm_engine
 from agentflow.models.formatters import ToolCommand
 
-# Tool name mapping: Static fallback mapping (long external names to internal)
-TOOL_NAME_MAPPING_LONG = {
-    "Generalist_Solution_Generator_Tool": {
-        "class_name": "Base_Generator_Tool",
-        "dir_name": "base_generator"
-    },
-    "Ground_Google_Search_Tool": {
-        "class_name": "Google_Search_Tool",
-        "dir_name": "google_search"
-    },
-    "Python_Code_Generator_Tool": {
-        "class_name": "Python_Coder_Tool",
-        "dir_name": "python_coder"
-    },
-    "Web_RAG_Search_Tool": {
-        "class_name": "Web_Search_Tool",
-        "dir_name": "web_search"
-    },
-    "Wikipedia_RAG_Search_Tool": {
-        "class_name": "Wikipedia_Search_Tool",
-        "dir_name": "wikipedia_search"
-    }
-}
-
-# Short to long mapping for fallback
-TOOL_NAME_MAPPING_SHORT = {
-    "Base_Generator_Tool": "Generalist_Solution_Generator_Tool",
-    "Google_Search_Tool": "Ground_Google_Search_Tool",
-    "Python_Coder_Tool": "Python_Code_Generator_Tool",
-    "Web_Search_Tool": "Web_RAG_Search_Tool",
-    "Wikipedia_Search_Tool": "Wikipedia_RAG_Search_Tool"
-}
+# Tool name mapping removed - using direct tool names from external input
 
 try:
     TimeoutError
@@ -52,8 +21,8 @@ def timeout_handler(signum, frame):
     raise TimeoutError("Function execution timed out")
 
 class Executor:
-    def __init__(self, llm_engine_name: str, root_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120, 
-    max_output_length: int = 100000, verbose: bool = False, base_url: str = None, check_model: bool = True, temperature: float = .0):
+    def __init__(self, llm_engine_name: str, root_cache_dir: str = "solver_cache",  num_threads: int = 1, max_time: int = 120,
+    max_output_length: int = 100000, verbose: bool = False, base_url: str = None, check_model: bool = True, temperature: float = .0, tool_instances: Dict[str, Any] = None):
         self.llm_engine_name = llm_engine_name
         self.root_cache_dir = root_cache_dir
         self.num_threads = num_threads
@@ -63,7 +32,10 @@ class Executor:
         self.base_url = base_url
         self.check_model = check_model
         self.temperature  = temperature
-        if base_url is not None:
+        self.tool_instances = tool_instances or {}  # Cache of tool instances from Initializer
+
+        # Only pass base_url for vLLM models, not for remote APIs like DashScope, OpenAI, etc.
+        if "vllm" in self.llm_engine_name and base_url:
             self.llm_generate_tool_command = create_llm_engine(model_string=self.llm_engine_name, is_multimodal=False, base_url=self.base_url, temperature = self.temperature)
         else:
             self.llm_generate_tool_command = create_llm_engine(model_string=self.llm_engine_name, is_multimodal=False, temperature = self.temperature)
@@ -220,37 +192,21 @@ execution = tool.execute(query=["Methanol", "function of hyperbola", "Fermat's L
             finally:
                 signal.alarm(0)  # Ensure alarm is disabled even if other exceptions occur
 
-        # Import the tool module and instantiate it
-        # tool_name could be either short or long name
-        # First check if it's a long name
-        if tool_name in TOOL_NAME_MAPPING_LONG:
-            dir_name = TOOL_NAME_MAPPING_LONG[tool_name]["dir_name"]
-            class_name = TOOL_NAME_MAPPING_LONG[tool_name]["class_name"]
-        # Then check if it's a short name (convert to long, then get internal)
-        elif tool_name in TOOL_NAME_MAPPING_SHORT:
-            long_name = TOOL_NAME_MAPPING_SHORT[tool_name]
-            if long_name in TOOL_NAME_MAPPING_LONG:
-                dir_name = TOOL_NAME_MAPPING_LONG[long_name]["dir_name"]
-                class_name = TOOL_NAME_MAPPING_LONG[long_name]["class_name"]
-            else:
-                # Shouldn't happen, but fallback
-                dir_name = tool_name.lower().replace('_tool', '')
-                class_name = tool_name
-        else:
-            # Fallback to original behavior for unmapped tools
-            dir_name = tool_name.lower().replace('_tool', '')
-            class_name = tool_name
-
-        module_name = f"tools.{dir_name}.tool"
-
         try:
-            # Dynamically import the module
-            module = importlib.import_module(module_name)
+            # Use cached tool instance if available
+            if tool_name in self.tool_instances:
+                tool = self.tool_instances[tool_name]
+                print(f"Using cached tool instance for {tool_name}")
+            else:
+                # Fallback: dynamically create tool instance (backward compatibility)
+                print(f"Warning: Tool {tool_name} not found in cache, creating new instance")
+                class_name = tool_name
+                dir_name = tool_name.lower().replace('_tool', '')
+                module_name = f"tools.{dir_name}.tool"
 
-            # Get the tool class
-            tool_class = getattr(module, class_name)
-            
-            tool = tool_class()
+                module = importlib.import_module(module_name)
+                tool_class = getattr(module, class_name)
+                tool = tool_class()
 
             # Set the custom output directory
             tool.set_custom_output_dir(self.query_cache_dir)

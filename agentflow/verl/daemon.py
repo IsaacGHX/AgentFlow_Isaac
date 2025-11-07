@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import random
 import socket
 import threading
@@ -13,6 +14,7 @@ import requests
 import torch
 from agentflow import LLM, AgentFlowServer, NamedResources, Rollout, configure_logger
 from flask import Flask, Response, abort, request
+from openai import OpenAI
 from openai.types.chat.chat_completion import ChatCompletion
 from tensordict import TensorDict
 
@@ -108,6 +110,9 @@ class AgentModeDaemon:
         llm_timeout_seconds=600.0,
         enable_rollout_validation=True,
         max_empty_retries=2,
+        reward_shaping_gamma=0.99,
+        enable_reward_shaping=True,
+        reward_mode='discount',
     ):
         # Server and Task Configuration
         self.server_port = port
@@ -138,6 +143,11 @@ class AgentModeDaemon:
         self.enable_rollout_validation = enable_rollout_validation
         self.max_empty_retries = max_empty_retries
         self._empty_rollout_counts: Dict[str, int] = {}
+
+        # Reward shaping configuration
+        self.reward_shaping_gamma = reward_shaping_gamma
+        self.enable_reward_shaping = enable_reward_shaping
+        self.reward_mode = reward_mode  # 'discount' or 'process'
 
     def _start_proxy_server(self):
         """
@@ -654,9 +664,19 @@ class AgentModeDaemon:
         valid_samples = 0
         all_samples_num = 0
         for rollout_id, sample_info in finished_id_to_sample_info.items():
-            for turn_index, trace in enumerate(sample_info["trace_list"]):
+            # Compute turn-level rewards for this rollout
+            final_reward = sample_info["reward"]
+            n_turns = len(sample_info["trace_list"])
 
-                reward_list.append(sample_info["reward"])
+            # Get the original rollout to access triplets
+            rollout = self._completed_rollouts.get(rollout_id)
+            triplets = rollout.triplets if rollout else None
+
+            turn_level_rewards = self._compute_turn_level_rewards(final_reward, n_turns, triplets=triplets)
+
+            for turn_index, trace in enumerate(sample_info["trace_list"]):
+                # Use turn-specific reward instead of final reward for all turns
+                reward_list.append(turn_level_rewards[turn_index])
                 prompt_ids, response_ids = trace["prompt_ids"], trace["response_ids"]
                 all_samples_num += 1
                 
@@ -761,6 +781,8 @@ class AgentModeDaemon:
 
     def clear_data_and_server(self):
         """Resets the internal state of the daemon for the next run."""
+        import gc
+
         self.backend_llm_server_addresses = []
         self._completed_rollouts.clear()
         self._task_id_to_original_sample.clear()
@@ -777,6 +799,10 @@ class AgentModeDaemon:
         if hasattr(self.server, 'clear_queues'):
             self.server.clear_queues()
 
+        # Force garbage collection to free up memory
+        gc.collect()
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
     def _fillna_reward(self, rollout):
         if rollout.final_reward is None:
             if self.reward_fillna_value is not None:
@@ -786,3 +812,231 @@ class AgentModeDaemon:
         else:
             final_reward = rollout.final_reward
         return final_reward
+
+    def _compute_turn_level_rewards(self, final_reward: float, n_turns: int, triplets: list = None) -> list:
+        """
+        Compute turn-level rewards based on the configured reward_mode.
+
+        Args:
+            final_reward: The final reward for the entire rollout
+            n_turns: Number of turns in the rollout
+            triplets: List of Triplet objects containing prompt, response, and metadata for each turn
+
+        Returns:
+            List of rewards for each turn
+
+        Modes:
+            - 'discount': Uses exponential discounting (gamma-based)
+            - 'process': Uses GPT-4o to evaluate each turn's quality (process reward)
+            - 'first_turn_full': First turn gets full reward, subsequent turns are discounted
+        """
+        # If reward shaping is disabled, all turns get the same final reward
+        if not self.enable_reward_shaping or n_turns <= 1:
+            return [final_reward] * n_turns
+
+        # Dispatch to the appropriate reward computation method
+        if self.reward_mode == 'process':
+            return self._compute_process_rewards(final_reward, n_turns, triplets)
+        elif self.reward_mode == 'first_turn_full':
+            return self._compute_first_turn_full_rewards(final_reward, n_turns)
+        else:  # default to 'discount'
+            return self._compute_discount_rewards(final_reward, n_turns)
+
+    def _compute_discount_rewards(self, final_reward: float, n_turns: int) -> list:
+        """
+        Compute turn-level rewards with exponential discount factor.
+
+        Args:
+            final_reward: The final reward for the entire rollout
+            n_turns: Number of turns in the rollout
+
+        Returns:
+            List of rewards for each turn, with exponential discounting applied
+
+        Strategy:
+            Uses exponential discounting from the final turn backwards:
+            - Last turn (n-1): final_reward * gamma^0 = final_reward
+            - Turn (n-2): final_reward * gamma^1
+            - Turn (n-3): final_reward * gamma^2
+            - ...
+            - Turn 0: final_reward * gamma^(n-1)
+
+        Example with gamma=0.99, final_reward=1.0, n_turns=3:
+            - Turn 2: 1.0 * 0.99^0 = 1.0
+            - Turn 1: 1.0 * 0.99^1 = 0.99
+            - Turn 0: 1.0 * 0.99^2 = 0.9801
+        """
+        turn_rewards = []
+        for turn_idx in range(n_turns):
+            # Distance from the last turn
+            distance_from_end = n_turns - turn_idx - 1
+            # Apply exponential discount
+            turn_reward = final_reward * (self.reward_shaping_gamma ** distance_from_end)
+            turn_rewards.append(turn_reward)
+
+        return turn_rewards
+
+    def _compute_first_turn_full_rewards(self, final_reward: float, n_turns: int) -> list:
+        """
+        Compute turn-level rewards where the first turn gets full reward and subsequent turns are discounted.
+
+        Args:
+            final_reward: The final reward for the entire rollout
+            n_turns: Number of turns in the rollout
+
+        Returns:
+            List of rewards for each turn, with first turn getting full reward and others discounted
+
+        Strategy:
+            First turn gets the full final_reward, and subsequent turns are discounted:
+            - Turn 0: final_reward (full reward)
+            - Turn 1: final_reward * gamma^1
+            - Turn 2: final_reward * gamma^2
+            - ...
+            - Turn (n-1): final_reward * gamma^(n-1)
+
+        Example with gamma=0.9, final_reward=1.0, n_turns=3:
+            - Turn 0: 1.0
+            - Turn 1: 1.0 * 0.9^1 = 0.9
+            - Turn 2: 1.0 * 0.9^2 = 0.81
+        """
+        turn_rewards = []
+        for turn_idx in range(n_turns):
+            if turn_idx == 0:
+                # First turn gets full reward
+                turn_reward = final_reward
+            else:
+                # Subsequent turns are discounted based on their position
+                turn_reward = final_reward * (self.reward_shaping_gamma ** turn_idx)
+            turn_rewards.append(turn_reward)
+
+        return turn_rewards
+
+    def _compute_process_rewards(self, final_reward: float, n_turns: int, triplets: list = None) -> list:
+        """
+        Compute turn-level rewards using GPT-4o to evaluate each turn's quality (process reward).
+
+        This version uses batch/concurrent evaluation for significant speedup when multiple turns exist.
+
+        Args:
+            final_reward: The final reward for the entire rollout
+            n_turns: Number of turns in the rollout
+            triplets: List of Triplet objects containing prompt, response, and metadata for each turn
+
+        Returns:
+            List of rewards for each turn based on GPT-4o evaluation
+
+        Strategy:
+            - Uses GPT-4o to evaluate all turns concurrently (batch mode) based on:
+              1. Tool/action selection appropriateness
+              2. Memory/context utilization
+              3. Step correctness and progress toward solution
+            - For the final turn, also considers whether the final answer is correct
+            - Falls back to exponential discounting if GPT-4o evaluation is unavailable or fails
+        """
+        # Fallback to discount mode if triplets not provided
+        if triplets is None:
+            logger.warning("Process reward mode requires triplets, falling back to discount mode")
+            return self._compute_discount_rewards(final_reward, n_turns)
+
+        # Import the scoring function (try batch version first)
+        try:
+            from train.utils import compute_turn_scores_batch
+            use_batch = True
+        except ImportError:
+            try:
+                from train.utils import compute_turn_score
+                use_batch = False
+            except ImportError:
+                logger.warning("Cannot import scoring functions, falling back to discount mode")
+                return self._compute_discount_rewards(final_reward, n_turns)
+
+        final_answer_correct = final_reward > 0.5  # Assume reward > 0.5 means correct answer
+
+        # Prepare data for batch scoring if using batch mode
+        if use_batch:
+            try:
+                # Build batch data for all turns
+                turns_data = []
+                for turn_idx in range(n_turns):
+                    triplet = triplets[turn_idx]
+
+                    # Extract information from triplet
+                    action_planner_response = str(triplet.response.get("text", "")) if isinstance(triplet.response, dict) else str(triplet.response)
+                    prompt_text = str(triplet.prompt.get("text", "")) if isinstance(triplet.prompt, dict) else str(triplet.prompt)
+
+                    # Get tools used from metadata if available
+                    tools_used = triplet.metadata.get("tools_used", [])
+                    if isinstance(tools_used, str):
+                        tools_used = [tools_used]
+
+                    # Use prompt as memory context
+                    memory_context = prompt_text
+                    is_final_turn = (turn_idx == n_turns - 1)
+
+                    turns_data.append({
+                        "turn_index": turn_idx,
+                        "action_planner_response": action_planner_response,
+                        "tools_used": tools_used,
+                        "memory_context": memory_context,
+                        "is_final_turn": is_final_turn,
+                        "final_answer_correct": final_answer_correct if is_final_turn else None
+                    })
+
+                # Score all turns concurrently
+                logger.info(f"Scoring {n_turns} turns concurrently using batch mode...")
+                turn_scores = compute_turn_scores_batch(turns_data)
+
+                # Scale scores by final reward
+                turn_rewards = [final_reward * score for score in turn_scores]
+                logger.info(f"Batch scoring completed: {[f'{r:.3f}' for r in turn_rewards]}")
+                return turn_rewards
+
+            except Exception as e:
+                logger.warning(f"Batch scoring failed: {e}. Falling back to sequential mode.")
+                # Fall through to sequential mode below
+
+        # Sequential mode (original implementation)
+        turn_rewards = []
+        for turn_idx in range(n_turns):
+            try:
+                triplet = triplets[turn_idx]
+
+                # Extract information from triplet
+                action_planner_response = str(triplet.response.get("text", "")) if isinstance(triplet.response, dict) else str(triplet.response)
+                prompt_text = str(triplet.prompt.get("text", "")) if isinstance(triplet.prompt, dict) else str(triplet.prompt)
+
+                # Get tools used from metadata if available
+                tools_used = triplet.metadata.get("tools_used", [])
+                if isinstance(tools_used, str):
+                    tools_used = [tools_used]
+
+                # Use prompt as memory context
+                memory_context = prompt_text
+
+                is_final_turn = (turn_idx == n_turns - 1)
+
+                # Get GPT-4o score for this turn (0-1)
+                turn_score = compute_turn_score(
+                    turn_index=turn_idx,
+                    action_planner_response=action_planner_response,
+                    tools_used=tools_used,
+                    memory_context=memory_context,
+                    is_final_turn=is_final_turn,
+                    final_answer_correct=final_answer_correct if is_final_turn else None
+                )
+
+                # Scale the turn score by the final reward
+                # This way, if final answer is wrong (final_reward=0), all turns get low rewards
+                # If final answer is correct (final_reward=1), turns are weighted by their quality
+                turn_reward = final_reward * turn_score
+                turn_rewards.append(turn_reward)
+
+            except Exception as e:
+                logger.warning(f"Error computing GPT-4o score for turn {turn_idx}: {e}. Using discount fallback.")
+                # Fallback to exponential discounting for this turn
+                distance_from_end = n_turns - turn_idx - 1
+                turn_reward = final_reward * (self.reward_shaping_gamma ** distance_from_end)
+                turn_rewards.append(turn_reward)
+
+        return turn_rewards

@@ -8,6 +8,9 @@ defaults:
 
 agentflow:
   port: 9999
+  reward_shaping_gamma: 0.99
+  enable_reward_shaping: True
+  reward_mode: discount
 
 data:
   filter_overlong_prompts: false

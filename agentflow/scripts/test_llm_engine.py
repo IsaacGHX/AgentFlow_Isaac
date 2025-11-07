@@ -77,7 +77,7 @@ def test_all_engines_with_fault_tolerance():
     test_cases: List[Dict] = [
         {"model_string": "gpt-4o", "expected": "ChatOpenAI", "kwargs": {}},
         {"model_string": "azure-gpt-4", "expected": "ChatAzureOpenAI", "kwargs": {}},
-        {"model_string": "dashscope-qwen2.5-3b-instruct", "expected": "ChatDashScope", "kwargs": {}},
+        {"model_string": "dashscope-qwen3-1.7b", "expected": "ChatDashScope", "kwargs": {}},
         {"model_string": "claude-3-5-sonnet", "expected": "ChatAnthropic", "kwargs": {}},
         {"model_string": "deepseek-chat", "expected": "ChatDeepseek", "kwargs": {}},
         {"model_string": "gemini-1.5-pro", "expected": "ChatGemini", "kwargs": {}},

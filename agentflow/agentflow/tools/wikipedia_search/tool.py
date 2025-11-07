@@ -16,7 +16,7 @@ from agentflow.tools.base import BaseTool
 from agentflow.engine.factory import create_llm_engine
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Wikipedia_RAG_Search_Tool"
+TOOL_NAME = "Wikipedia_Search_Tool"
 
 LIMITATION = f"""
 {TOOL_NAME} has the following limitations:

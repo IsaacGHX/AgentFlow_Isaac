@@ -20,6 +20,38 @@ from utils import compute_score
 configure_logger()
 
 
+def make_json_serializable(obj):
+    """
+    Convert an object to a JSON-serializable format.
+    Handles common non-serializable types like Exception objects.
+    """
+    if isinstance(obj, dict):
+        return {k: make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    elif isinstance(obj, Exception):
+        # Convert exceptions to their string representation
+        return {
+            "error_type": type(obj).__name__,
+            "error_message": str(obj),
+            "error_repr": repr(obj)
+        }
+    elif hasattr(obj, '__dict__'):
+        # For custom objects, try to convert their __dict__
+        try:
+            return make_json_serializable(obj.__dict__)
+        except:
+            return str(obj)
+    else:
+        # For primitive types, return as-is
+        try:
+            json.dumps(obj)  # Test if it's serializable
+            return obj
+        except (TypeError, ValueError):
+            # If not serializable, convert to string
+            return str(obj)
+
+
 @reward
 async def eval(question: str, groundtruth: any, answer_extracted: any, val: bool = False) -> float:
     """
@@ -90,7 +122,7 @@ def get_agent(
     resources,
     tools: list[str],
     max_steps: int,
-    tool_engine: str,
+    tool_engine: list[str],  # Fixed: should be list[str], not str
     max_tokens: int,
     output_type: str,
     timeout: int,
@@ -133,7 +165,9 @@ class Rollout(LitAgent):
     train_temperature: float = 0.7,
     test_temperature: float = 0.0,
     output_type: str = "direct",
-    timeout: int = 300, 
+    timeout: int = 300,
+    reward_shaping_gamma: float = 0.99,
+    enable_reward_shaping: bool = True,
     ):
         super().__init__()
         self.server_public_ip=server_public_ip
@@ -168,6 +202,10 @@ class Rollout(LitAgent):
         self.rollout_num = rollout_n # As defined in the original code logic
         self.max_steps = max_steps
         self.max_tokens = max_tokens
+
+        # Reward shaping parameters
+        self.reward_shaping_gamma = reward_shaping_gamma
+        self.enable_reward_shaping = enable_reward_shaping
 
     async def _solve_and_evaluate(self, rollout: AgentFlowRollout, task: Any, step_n: int, val: bool = False):
         """A helper function to run the agent, parse the result, and evaluate it."""
@@ -209,7 +247,7 @@ class Rollout(LitAgent):
             "groundtruth": task.get("extra_info", {}).get("groundtruth", task["result"]),
             "answer_extracted": answer,
             "reward": reward_value,
-            "total_result":result,
+            "total_result": make_json_serializable(result),  # Ensure JSON serializable
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -220,7 +258,7 @@ class Rollout(LitAgent):
 
         # This function now uses the `step_n` passed as an argument.
         step_dir = os.path.join(save_dir, f"step_{step_n}")
-        
+
         idx_dir = os.path.join(step_dir, f"idx_{idx}")
         os.makedirs(idx_dir, exist_ok=True)
 
@@ -233,10 +271,17 @@ class Rollout(LitAgent):
 
         save_path = os.path.join(idx_dir, filename)
 
-        with open(save_path, "w") as f:
-            json.dump(rollout_data, f, indent=2)
-
-        print(f"Rollout data saved to: {save_path}")
+        try:
+            with open(save_path, "w") as f:
+                json.dump(rollout_data, f, indent=2)
+            print(f"Rollout data saved to: {save_path}")
+        except Exception as e:
+            print(f"Error saving rollout data to {save_path}: {str(e)}")
+            # Try to save with even more aggressive serialization
+            rollout_data_safe = make_json_serializable(rollout_data)
+            with open(save_path, "w") as f:
+                json.dump(rollout_data_safe, f, indent=2)
+            print(f"Rollout data saved (with fallback serialization) to: {save_path}")
 
 
     async def _initialize_run_once(self, resources: NamedResources):
@@ -372,7 +417,9 @@ if __name__ == "__main__":
         "TEST_TEMPERATURE",
         "data.max_response_length",
         "OUTPUT_TYPE",
-        "AGENT_MAX_TIMEOUT"
+        "AGENT_MAX_TIMEOUT",
+        "REWARD_SHAPING_GAMMA",
+        "ENABLE_REWARD_SHAPING"
     ]
 
     config_file = 'train/config.yaml'
@@ -392,7 +439,9 @@ if __name__ == "__main__":
         "TEST_TEMPERATURE": "test_temperature",
         "data.max_response_length": "max_tokens",
         "OUTPUT_TYPE": "output_type",
-        "AGENT_MAX_TIMEOUT": "timeout", 
+        "AGENT_MAX_TIMEOUT": "timeout",
+        "REWARD_SHAPING_GAMMA": "reward_shaping_gamma",
+        "ENABLE_REWARD_SHAPING": "enable_reward_shaping",
     }
 
     config_dict = dict(zip(config_keys_map.values(), values))

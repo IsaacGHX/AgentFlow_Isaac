@@ -231,11 +231,12 @@ def construct_solver(llm_engine_name : str = "gpt-4o",
     # Instantiate Executor
     executor = Executor(
         # llm_engine_name=llm_engine_name,
-        llm_engine_name="dashscope",
+        llm_engine_name="dashscope-qwen2.5-7b-instruct",
         root_cache_dir=root_cache_dir,
         verbose=verbose,
         # base_url=base_url,
-        temperature=temperature
+        temperature=temperature,
+        tool_instances=initializer.tool_instances  # Pass cached tool instances
     )
 
     # Instantiate Solver

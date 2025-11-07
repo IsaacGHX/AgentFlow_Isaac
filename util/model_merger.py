@@ -161,4 +161,15 @@ checkpoints/
 execution code example:
 python util/model_merger.py --local_dirs $(find checkpoints/... -type d -name "actor")
 python util/model_merger.py --local_dirs checkpoints/.../actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_process_Reward_qwen2.5-3B/rollout_all_qwen2.5-3B_process_Reward/global_step_18/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_process_Reward_qwen2.5-7B/rollout_all_qwen2.5-7B_process_Reward/global_step_12/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_discount_Reward_qwen2.5-7B/rollout_all_qwen2.5-7B_discount_Reward/global_step_12/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_reverse_discount_Reward_qwen2.5-3B/rollout_all_qwen2.5-3B_reverse_discount_Reward/global_step_18/actor
+
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_reverse_discount_Reward_qwen2.5-7B/rollout_all_qwen2.5-7B_reverse_discount_Reward/global_step_34/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_Qwen2.5-7B-turn5/rollout_all_Qwen2.5-7B-turn5/global_step_32/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_Qwen2.5-7B-turn5/rollout_all_Qwen2.5-7B-turn5/global_step_26/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_Llama-3.2-3B/rollout_all_Llama-3.2-3B/global_step_28/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_Llama-3.1-8B/rollout_all_Llama-3.1-8B/global_step_18/actor
+python util/model_merger.py --local_dirs checkpoints/AgentFlow_Reward_qwen2.5-1.5B/rollout_all_qwen2.5-1.5B/global_step_34/actor
 """
