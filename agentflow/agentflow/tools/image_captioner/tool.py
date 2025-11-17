@@ -3,53 +3,51 @@ from agentflow.tools.base import BaseTool
 from agentflow.engine.factory import create_llm_engine
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Generalist_Solution_Generator_Tool"
+TOOL_NAME = "Image_Captioner_Tool"
 
 LIMITATION = f"""
-The {TOOL_NAME} may provide hallucinated or incorrect responses.
+The {TOOL_NAME} may provide hallucinated or incorrect responses about image content.
 """
 
 BEST_PRACTICE = f"""
 For optimal results with the {TOOL_NAME}:
-1. Use it for general queries or tasks that don't require specialized knowledge or specific tools in the toolbox.
-2. Provide clear, specific query.   
-3. Use it to answer the original query through step by step reasoning for tasks without complex or multi-step reasoning.
-4. For complex queries, break them down into subtasks and use the tool multiple times.
-5. Use it as a starting point for complex tasks, then refine with specialized tools.
-6. Verify important information from its responses.
+1. Provide a clear, specific query about what you want to know from the image.
+2. Ensure the image path is valid and accessible.
+3. Use descriptive queries like "Describe this image in detail", "What objects are in this image?", or "Explain the mood of this scene."
+4. For object detection queries, be specific about the format you need (e.g., bounding box coordinates).
+5. Verify important information from its responses, especially for critical applications.
 """
 
-class Base_Generator_Tool(BaseTool):
+class Image_Captioner_Tool(BaseTool):
     require_llm_engine = True
 
     def __init__(self, model_string="gpt-4o-mini"):
         super().__init__(
             tool_name=TOOL_NAME,
-            tool_description="A generalized tool that takes query from the user, and answers the question step by step to the best of its ability. It can also accept an image.",
+            tool_description="A tool that analyzes images and generates descriptions, captions, or answers questions about the image content. It uses a multimodal LLM to understand and describe visual information.",
             tool_version="1.0.0",
             input_types={
-                "query": "str - The query that includes query from the user to guide the agent to generate response.",
-                # "query": "str - The query that includes query from the user to guide the agent to generate response (Examples: 'Describe this image in detail').",
-                # "image": "str - The path to the image file if applicable (default: None).",
+                "query": "str - The query or instruction for what to analyze in the image (Examples: 'Describe this image in detail', 'What objects are in this image?', 'Explain the mood of this scene').",
+                "image": "str - The path to the image file to analyze.",
             },
-            output_type="str - The generated response to the original query",
+            output_type="str - The generated description, caption, or answer based on the image and query",
             demo_commands=[
                 {
-                    "command": 'execution = tool.execute(query="Summarize the following text in a few lines")',
-                    "description": "Generate a short summary given the query from the user."
+                    "command": 'execution = tool.execute(query="Describe this image in detail", image="path/to/image.png")',
+                    "description": "Generate a detailed description of the image."
                 },
-                # {
-                #     "command": 'execution = tool.execute(query="Explain the mood of this scene.", image="path/to/image1.png")',
-                #     "description": "Generate a caption focusing on the mood using a specific query and image."
-                # },
-                # {
-                    # "command": 'execution = tool.execute(query="Give your best coordinate estimate for the pacemaker in the image and return (x1, y1, x2, y2)", image="path/to/image2.png")',
-                    # "description": "Generate bounding box coordinates given the image and query from the user. The format should be (x1, y1, x2, y2)."
-                # },
-                # {
-                #     "command": 'execution = tool.execute(query="Is the number of tiny objects that are behind the small metal jet less than the number of tiny things left of the tiny sedan?", image="path/to/image2.png")',
-                #     "description": "Answer a question step by step given the image."
-                # }
+                {
+                    "command": 'execution = tool.execute(query="Explain the mood of this scene.", image="path/to/image1.png")',
+                    "description": "Generate a caption focusing on the mood using a specific query and image."
+                },
+                {
+                    "command": 'execution = tool.execute(query="What are the main objects in this image?", image="path/to/image2.png")',
+                    "description": "Identify and list the main objects present in the image."
+                },
+                {
+                    "command": 'execution = tool.execute(query="Is the number of tiny objects that are behind the small metal jet less than the number of tiny things left of the tiny sedan?", image="path/to/image2.png")',
+                    "description": "Answer a complex question step by step given the image."
+                }
             ],
 
             user_metadata = {
@@ -59,10 +57,10 @@ class Base_Generator_Tool(BaseTool):
 
         )
         self.model_string = model_string  
-        print(f"Initializing Generalist Tool with model: {self.model_string}")
-        # multimodal = True if image else False
-        multimodal = False
-        # llm_engine = create_llm_engine(model_string=self.model_string, is_multimodal=multimodal, base_url=self.base_url)
+        print(f"Initializing Image Captioner Tool with model: {self.model_string}")
+        
+        # Enable multimodal mode for image processing
+        multimodal = True
         
         # NOTE: deterministic mode
         self.llm_engine = create_llm_engine(
@@ -75,14 +73,38 @@ class Base_Generator_Tool(BaseTool):
             )
 
 
-    def execute(self, query, image=None):
+    def execute(self, query, image):
+        """
+        Execute the image captioner tool.
         
+        Args:
+            query (str): The query or instruction for analyzing the image
+            image (str): The path to the image file
+            
+        Returns:
+            str: The generated description, caption, or answer based on the image
+        """
         try:
-            input_data = [query]
-            response = self.llm_engine(input_data[0])
+            # Validate image parameter
+            if not image:
+                return "Error: No image path provided. Please provide a valid image path."
+            
+            # Check if image file exists
+            if not os.path.exists(image):
+                return f"Error: Image file not found at path: {image}"
+            
+            # Prepare input data with both query and image for multimodal LLM
+            input_data = {
+                "text": query,
+                "image": image
+            }
+            
+            # Call the multimodal LLM engine with the query and image
+            response = self.llm_engine(input_data)
             return response
+            
         except Exception as e:
-            return f"Error generating response: {str(e)}"
+            return f"Error generating image description: {str(e)}"
 
     def get_metadata(self):
         metadata = super().get_metadata()
@@ -93,7 +115,7 @@ if __name__ == "__main__":
     """
     Run the following commands in the terminal to test the script:
     
-    cd agentflow/tools/base_generator
+    cd agentflow/tools/image_captioner
     python tool.py
     """
 
@@ -101,27 +123,32 @@ if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     print(f"Script directory: {script_dir}")
 
-    # Example usage of the Generalist_Tool
-    tool = Base_Generator_Tool()
-
-    tool = Base_Generator_Tool(model_string="gpt-4o-mini") # NOTE: strong LLM for tool
-    # tool = Base_Generator_Tool(model_string="gemini-1.5-flash") # NOTE: weak 8B model for tool
-    # tool = Base_Generator_Tool(model_string="dashscope") # NOTE: weak Qwen2.5-7B model for tool
-
+    # Example usage of the Image_Captioner_Tool
+    tool = Image_Captioner_Tool(model_string="gpt-4o-mini") # NOTE: strong multimodal LLM for tool
+    # tool = Image_Captioner_Tool(model_string="gemini-1.5-flash") # NOTE: alternative multimodal model
 
     # Get tool metadata
     metadata = tool.get_metadata()
+    print("\n=== Tool Metadata ===")
     print(metadata)
 
-    query = "What is the capital of France?"
+    # Test with example image if available
+    example_image_path = os.path.join(script_dir, "examples", "baseball.png")
+    
+    if os.path.exists(example_image_path):
+        query = "Describe this image in detail."
+        print(f"\n=== Testing with image: {example_image_path} ===")
+        print(f"Query: {query}")
+        
+        try:
+            execution = tool.execute(query=query, image=example_image_path)
+            print("\nGenerated Image Description:")
+            print(execution)
+        except Exception as e: 
+            print(f"Execution failed: {e}")
+    else:
+        print(f"\n=== Note: Example image not found at {example_image_path} ===")
+        print("To test this tool, provide a valid image path:")
+        print('tool.execute(query="Describe this image", image="/path/to/your/image.png")')
 
-    # Execute the tool with default query
-    try:
-        execution = tool.execute(query=query)
-
-        print("Generated Response:")
-        print(execution)
-    except Exception as e: 
-        print(f"Execution failed: {e}")
-
-    print("Done!")
+    print("\nDone!")
