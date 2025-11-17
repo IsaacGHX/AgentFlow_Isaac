@@ -3,7 +3,7 @@ from agentflow.tools.base import BaseTool
 from agentflow.engine.factory import create_llm_engine
 
 # Tool name mapping - this defines the external name for this tool
-TOOL_NAME = "Image_Captioner_Tool"
+TOOL_NAME = "Visual_Generator_Tool"
 
 LIMITATION = f"""
 The {TOOL_NAME} may provide hallucinated or incorrect responses about image content.
@@ -18,7 +18,7 @@ For optimal results with the {TOOL_NAME}:
 5. Verify important information from its responses, especially for critical applications.
 """
 
-class Image_Captioner_Tool(BaseTool):
+class Visual_Generator_Tool(BaseTool):
     require_llm_engine = True
 
     def __init__(self, model_string="gpt-4o-mini"):
@@ -28,7 +28,7 @@ class Image_Captioner_Tool(BaseTool):
             tool_version="1.0.0",
             input_types={
                 "query": "str - The query or instruction for what to analyze in the image (Examples: 'Describe this image in detail', 'What objects are in this image?', 'Explain the mood of this scene').",
-                "image": "str - The path to the image file to analyze.",
+                "image": "str - The path to the image file to analyze (can be absolute or relative to current directory).",
             },
             output_type="str - The generated description, caption, or answer based on the image and query",
             demo_commands=[
@@ -57,7 +57,7 @@ class Image_Captioner_Tool(BaseTool):
 
         )
         self.model_string = model_string  
-        print(f"Initializing Image Captioner Tool with model: {self.model_string}")
+        print(f"Initializing Visual Generator Tool with model: {self.model_string}")
         
         # Enable multimodal mode for image processing
         multimodal = True
@@ -75,26 +75,33 @@ class Image_Captioner_Tool(BaseTool):
 
     def execute(self, query, image):
         """
-        Execute the image captioner tool.
+        Execute the visual generator tool to answer queries about an image.
         
         Args:
             query (str): The query or instruction for analyzing the image
-            image (str): The path to the image file
+            image (str): The path to the image file (absolute or relative)
             
         Returns:
-            str: The generated description, caption, or answer based on the image
+            str: The generated description, caption, or answer based on the image and query
         """
         try:
+            # Validate query parameter
+            if not query:
+                return "Error: No query provided. Please provide a query to analyze the image."
+            
             # Validate image parameter
             if not image:
                 return "Error: No image path provided. Please provide a valid image path."
             
+            # Resolve the image path (handles both absolute and relative paths)
+            image_path = os.path.abspath(os.path.expanduser(image))
+            
             # Check if image file exists
-            if not os.path.exists(image):
-                return f"Error: Image file not found at path: {image}"
+            if not os.path.exists(image_path):
+                return f"Error: Image file not found at path: {image_path}"
             
             # Read the image file as bytes
-            with open(image, 'rb') as img_file:
+            with open(image_path, 'rb') as img_file:
                 image_bytes = img_file.read()
             
             # Prepare input data as a list with query text and image bytes
@@ -103,10 +110,12 @@ class Image_Captioner_Tool(BaseTool):
             
             # Call the multimodal LLM engine with the query and image
             response = self.llm_engine(input_data)
+            
+            # Return the response directly
             return response
             
         except Exception as e:
-            return f"Error generating image description: {str(e)}"
+            return f"Error generating response for query: {str(e)}"
 
     def get_metadata(self):
         metadata = super().get_metadata()
@@ -117,7 +126,7 @@ if __name__ == "__main__":
     """
     Run the following commands in the terminal to test the script:
     
-    cd agentflow/tools/image_captioner
+    cd agentflow/tools/visual_generator
     python tool.py
     """
 
@@ -125,32 +134,38 @@ if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     print(f"Script directory: {script_dir}")
 
-    # Example usage of the Image_Captioner_Tool
-    tool = Image_Captioner_Tool(model_string="gpt-4o-mini") # NOTE: strong multimodal LLM for tool
-    # tool = Image_Captioner_Tool(model_string="gemini-1.5-flash") # NOTE: alternative multimodal model
+    # Example usage of the Visual_Generator_Tool
+    tool = Visual_Generator_Tool(model_string="gpt-4o-mini") # NOTE: strong multimodal LLM for tool
+    # tool = Visual_Generator_Tool(model_string="gemini-1.5-flash") # NOTE: alternative multimodal model
 
     # Get tool metadata
     metadata = tool.get_metadata()
     print("\n=== Tool Metadata ===")
     print(metadata)
 
-    # Test with example image if available
-    example_image_path = os.path.join(script_dir, "examples", "baseball.png")
-    
-    if os.path.exists(example_image_path):
-        query = "Describe this image in detail."
-        print(f"\n=== Testing with image: {example_image_path} ===")
-        print(f"Query: {query}")
+    # Test with example images - use absolute paths
+    examples = [
+        {
+            "query": "How many baseballs are in the image?",
+            "image": os.path.join(script_dir, "examples/baseball.png")
+        },
+        {
+            "query": "What is the name of the store in the image?",
+            "image": os.path.join(script_dir, "examples/store.jpg")
+        }
+    ]
+
+    for idx, example in enumerate(examples, 1):
+        print(f"\n=== Example {idx} ===")
+        print(f"Query: {example['query']}")
+        print(f"Image: {example['image']}")
         
         try:
-            execution = tool.execute(query=query, image=example_image_path)
-            print("\nGenerated Image Description:")
+            execution = tool.execute(**example)
+            print("\nGenerated Response:")
             print(execution)
-        except Exception as e: 
+            print("\n")
+        except Exception as e:
             print(f"Execution failed: {e}")
-    else:
-        print(f"\n=== Note: Example image not found at {example_image_path} ===")
-        print("To test this tool, provide a valid image path:")
-        print('tool.execute(query="Describe this image", image="/path/to/your/image.png")')
 
     print("\nDone!")
